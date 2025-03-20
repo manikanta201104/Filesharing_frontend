@@ -21,14 +21,12 @@ const emailURL = `${baseURL}/api/files/send`;
 
 const maxAllowedSize = 100 * 1024 * 1024; //100mb
 
-
 browseBtn.addEventListener("click", () => {
   fileInput.click();
 });
 
 dropZone.addEventListener("drop", (e) => {
   e.preventDefault();
-  //   console.log("dropped", e.dataTransfer.files[0].name);
   const files = e.dataTransfer.files;
   if (files.length === 1) {
     if (files[0].size < maxAllowedSize) {
@@ -46,30 +44,24 @@ dropZone.addEventListener("drop", (e) => {
 dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
   dropZone.classList.add("dragged");
-
-  // console.log("dropping file");
 });
 
 dropZone.addEventListener("dragleave", (e) => {
   dropZone.classList.remove("dragged");
-
-  console.log("drag ended");
 });
 
-// file input change and uploader
 fileInput.addEventListener("change", () => {
   if (fileInput.files[0].size > maxAllowedSize) {
     showToast("Max file size is 100MB");
-    fileInput.value = ""; // reset the input
+    fileInput.value = "";
     return;
   }
   uploadFile();
 });
 
-// sharing container listenrs
 copyURLBtn.addEventListener("click", () => {
   fileURL.select();
-  document.execCommand("copy");
+  navigator.clipboard.writeText(fileURL.value);
   showToast("Copied to clipboard");
 });
 
@@ -77,94 +69,107 @@ fileURL.addEventListener("click", () => {
   fileURL.select();
 });
 
-const uploadFile = () => {
-  console.log("file added uploading");
+const uploadFile = async () => {
+  try {
+    const files = fileInput.files;
+    if (!files || files.length === 0) return;
 
-  files = fileInput.files;
-  const formData = new FormData();
-  formData.append("myfile", files[0]);
+    const formData = new FormData();
+    formData.append("myfile", files[0]);
 
-  //show the uploader
-  progressContainer.style.display = "block";
+    progressContainer.style.display = "block";
+    status.innerText = "Uploading...";
 
-  // upload file
-  const xhr = new XMLHttpRequest();
+    const response = await fetch(uploadURL, {
+      method: "POST",
+      body: formData,
+      // Add headers if your backend requires specific ones
+      // headers: {
+      //   "Accept": "application/json"
+      // }
+    });
 
-  // listen for upload progress
-  xhr.upload.onprogress = function (event) {
-    // find the percentage of uploaded
-    let percent = Math.round((100 * event.loaded) / event.total);
-    progressPercent.innerText = percent;
-    const scaleX = `scaleX(${percent / 100})`;
-    bgProgress.style.transform = scaleX;
-    progressBar.style.transform = scaleX;
-  };
+    // Simulate progress (since we can't get real progress with fetch easily)
+    let percent = 0;
+    const progressInterval = setInterval(() => {
+      if (percent < 90) {
+        percent += 10;
+        progressPercent.innerText = percent;
+        const scaleX = `scaleX(${percent / 100})`;
+        bgProgress.style.transform = scaleX;
+        progressBar.style.transform = scaleX;
+      }
+    }, 200);
 
-  // handle error
-  xhr.upload.onerror = function () {
-    showToast(`Error in upload: ${xhr.status}.`);
-    fileInput.value = ""; // reset the input
-  };
-
-  // listen for response which will give the link
-  xhr.onreadystatechange = function () {
-    if (xhr.readyState == XMLHttpRequest.DONE) {
-      onFileUploadSuccess(xhr.responseText);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-  };
 
-  xhr.open("POST", uploadURL);
-  xhr.send(formData);
+    const data = await response.json();
+    clearInterval(progressInterval);
+    
+    // Complete the progress bar
+    progressPercent.innerText = 100;
+    bgProgress.style.transform = "scaleX(1)";
+    progressBar.style.transform = "scaleX(1)";
+
+    onFileUploadSuccess(data);
+  } catch (error) {
+    showToast(`Error in upload: ${error.message}`);
+    fileInput.value = "";
+    progressContainer.style.display = "none";
+  }
 };
 
-const onFileUploadSuccess = (res) => {
-  fileInput.value = ""; // reset the input
+const onFileUploadSuccess = (data) => {
+  fileInput.value = "";
   status.innerText = "Uploaded";
-
-  // remove the disabled attribute from form btn & make text send
+  
   emailForm[2].removeAttribute("disabled");
   emailForm[2].innerText = "Send";
-  progressContainer.style.display = "none"; // hide the box
+  progressContainer.style.display = "none";
 
-  const { file: url } = JSON.parse(res);
-  console.log(url);
   sharingContainer.style.display = "block";
-  fileURL.value = url;
+  fileURL.value = data.file; // Adjust this based on your backend response structure
 };
 
-emailForm.addEventListener("submit", (e) => {
-  e.preventDefault(); // stop submission
+emailForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
 
-  // disable the button
   emailForm[2].setAttribute("disabled", "true");
   emailForm[2].innerText = "Sending";
 
   const url = fileURL.value;
-
   const formData = {
-    uuid: url.split("/").splice(-1, 1)[0],
+    uuid: url.split("/").pop(),
     emailTo: emailForm.elements["to-email"].value,
     emailFrom: emailForm.elements["from-email"].value,
   };
-  console.log(formData);
-  fetch(emailURL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(formData),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data.success) {
-        showToast("Email Sent");
-        sharingContainer.style.display = "none"; // hide the box
-      }
+
+  try {
+    const response = await fetch(emailURL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(formData),
     });
+
+    const data = await response.json();
+    if (data.success) {
+      showToast("Email Sent");
+      sharingContainer.style.display = "none";
+    } else {
+      throw new Error(data.error || "Failed to send email");
+    }
+  } catch (error) {
+    showToast(`Error sending email: ${error.message}`);
+    emailForm[2].removeAttribute("disabled");
+    emailForm[2].innerText = "Send";
+  }
 });
 
 let toastTimer;
-// the toast function
 const showToast = (msg) => {
   clearTimeout(toastTimer);
   toast.innerText = msg;
