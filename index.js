@@ -19,7 +19,7 @@ const baseURL = "https://filesharing-backend-6uqo.onrender.com";
 const uploadURL = `${baseURL}/api/files`;
 const emailURL = `${baseURL}/api/files/send`;
 
-const maxAllowedSize = 100 * 1024 * 1024; //100mb
+const maxAllowedSize = 100 * 1024 * 1024; // 100MB
 
 browseBtn.addEventListener("click", () => {
   fileInput.click();
@@ -72,24 +72,27 @@ fileURL.addEventListener("click", () => {
 const uploadFile = async () => {
   try {
     const files = fileInput.files;
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0) {
+      showToast("No file selected");
+      return;
+    }
 
     const formData = new FormData();
-    formData.append("myfile", files[0]);
+    formData.append("myfile", files[0]); // Ensure the field name matches what the backend expects
 
     progressContainer.style.display = "block";
     status.innerText = "Uploading...";
 
+    console.log("Uploading file to:", uploadURL);
+    console.log("File details:", files[0].name, files[0].size, files[0].type);
+
     const response = await fetch(uploadURL, {
       method: "POST",
       body: formData,
-      // Add headers if your backend requires specific ones
-      // headers: {
-      //   "Accept": "application/json"
-      // }
+      credentials: "omit", // Avoid sending credentials unless needed
     });
 
-    // Simulate progress (since we can't get real progress with fetch easily)
+    // Simulate progress
     let percent = 0;
     const progressInterval = setInterval(() => {
       if (percent < 90) {
@@ -102,19 +105,27 @@ const uploadFile = async () => {
     }, 200);
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! Status: ${response.status}, Message: ${errorText}`);
     }
 
     const data = await response.json();
     clearInterval(progressInterval);
-    
+
     // Complete the progress bar
     progressPercent.innerText = 100;
     bgProgress.style.transform = "scaleX(1)";
     progressBar.style.transform = "scaleX(1)";
 
+    console.log("Upload successful. Response:", data);
+
+    if (!data.file) {
+      throw new Error("Backend response does not contain a 'file' property");
+    }
+
     onFileUploadSuccess(data);
   } catch (error) {
+    console.error("Upload error:", error);
     showToast(`Error in upload: ${error.message}`);
     fileInput.value = "";
     progressContainer.style.display = "none";
@@ -124,13 +135,13 @@ const uploadFile = async () => {
 const onFileUploadSuccess = (data) => {
   fileInput.value = "";
   status.innerText = "Uploaded";
-  
+
   emailForm[2].removeAttribute("disabled");
   emailForm[2].innerText = "Send";
   progressContainer.style.display = "none";
 
   sharingContainer.style.display = "block";
-  fileURL.value = data.file; // Adjust this based on your backend response structure
+  fileURL.value = data.file; // Set the file URL
 };
 
 emailForm.addEventListener("submit", async (e) => {
@@ -147,6 +158,9 @@ emailForm.addEventListener("submit", async (e) => {
   };
 
   try {
+    console.log("Sending email request to:", emailURL);
+    console.log("Email form data:", formData);
+
     const response = await fetch(emailURL, {
       method: "POST",
       headers: {
@@ -156,6 +170,10 @@ emailForm.addEventListener("submit", async (e) => {
     });
 
     const data = await response.json();
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}, Message: ${data.error || "Unknown error"}`);
+    }
+
     if (data.success) {
       showToast("Email Sent");
       sharingContainer.style.display = "none";
@@ -163,6 +181,7 @@ emailForm.addEventListener("submit", async (e) => {
       throw new Error(data.error || "Failed to send email");
     }
   } catch (error) {
+    console.error("Email send error:", error);
     showToast(`Error sending email: ${error.message}`);
     emailForm[2].removeAttribute("disabled");
     emailForm[2].innerText = "Send";
